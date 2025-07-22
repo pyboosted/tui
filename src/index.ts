@@ -1,4 +1,4 @@
-// Main exports for @boosted/tui
+// Main exports for @hexie/tui
 
 // ANSI utilities
 export {

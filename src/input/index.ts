@@ -1,5 +1,5 @@
 /**
- * Terminal input handling for @boosted/tui
+ * Terminal input handling for @hexie/tui
  *
  * This module provides comprehensive input handling including:
  * - Keyboard events with full modifier support

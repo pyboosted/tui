@@ -5,7 +5,7 @@ import { Terminal } from '../src/index.ts';
 const term = Terminal.open();
 
 // Title constant
-const title = ' @boosted/tui Demo ';
+const title = ' @hexie/tui Demo ';
 
 // Function to draw the UI
 function drawUI(message?: string) {
@@ -45,7 +45,7 @@ function drawUI(message?: string) {
   if (message) {
     term.putText(2, 2, message, { bold: true, fg: '#ffff00' });
   } else {
-    term.putText(2, 2, 'Welcome to @boosted/tui!', {
+    term.putText(2, 2, 'Welcome to @hexie/tui!', {
       bold: true,
       fg: '#00ff00',
     });

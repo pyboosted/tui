@@ -28,7 +28,7 @@ function drawStaticElements() {
   const height = term.rows;
 
   // Title
-  term.putText(1, 2, '@boosted/tui Animation Demo', {
+  term.putText(1, 2, '@hexie/tui Animation Demo', {
     bold: true,
     underline: true,
   });

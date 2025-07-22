@@ -1,4 +1,4 @@
-# @boosted/tui
+# @hexie/tui
 
 Minimal terminal primitives for Bun - a thin, focused library providing essential terminal I/O primitives and a diff-based renderer.
 
@@ -14,13 +14,13 @@ Minimal terminal primitives for Bun - a thin, focused library providing essentia
 ## Installation
 
 ```bash
-bun add @boosted/tui
+bun add @hexie/tui
 ```
 
 ## Quick Start
 
 ```typescript
-import { Terminal } from '@boosted/tui';
+import { Terminal } from '@hexie/tui';
 
 const term = Terminal.open();
 

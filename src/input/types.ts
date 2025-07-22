@@ -1,5 +1,5 @@
 /**
- * Input event types and interfaces for @boosted/tui
+ * Input event types and interfaces for @hexie/tui
  *
  * This module provides TypeScript types for keyboard and mouse events,
  * following a Crossterm-inspired API while being idiomatic to TypeScript.

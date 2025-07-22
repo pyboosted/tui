@@ -1,6 +1,6 @@
-# @boosted/tui Examples
+# @hexie/tui Examples
 
-This directory contains examples demonstrating various features of the @boosted/tui library.
+This directory contains examples demonstrating various features of the @hexie/tui library.
 
 ## Running Examples
 

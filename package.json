@@ -1,6 +1,6 @@
 {
   "name": "@hexie/tui",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
@@ -8,7 +8,9 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "ultracite lint",
-    "format": "ultracite format"
+    "format": "ultracite format",
+    "publish": "bun publish --access public",
+    "prepublishOnly": "bun run format && bun run typecheck"
   },
   "devDependencies": {
     "@biomejs/biome": "2.1.2",

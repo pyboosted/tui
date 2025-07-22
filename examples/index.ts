@@ -8,7 +8,7 @@ term.clear();
 term.hideCursor();
 
 // Title
-term.putText(1, 2, '@boosted/tui Examples', { bold: true, underline: true });
+term.putText(1, 2, '@hexie/tui Examples', { bold: true, underline: true });
 term.putText(3, 2, 'Available examples:', { bold: true });
 
 // Get all example files
