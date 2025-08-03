@@ -6,9 +6,15 @@
  */
 
 import type { Terminal } from '../terminal.ts';
+import {
+  type DetectedCapabilities,
+  detectCapabilities,
+  isFeatureSupported,
+} from './detection.ts';
+import { InputFeature, SupportLevel } from './features.ts';
 import { ESCAPE_SEQUENCES, KITTY_FLAGS } from './protocols.ts';
 import { configureDecoder } from './reader.ts';
-import type { InputOptions } from './types.ts';
+import type { InputConfig, InputMode, InputOptions } from './types.ts';
 
 /**
  * Terminal mode state tracking
@@ -20,6 +26,8 @@ interface TerminalModeState {
   kittyKeyboard: boolean;
   bracketedPaste: boolean;
   focusEvents: boolean;
+  enabledFeatures: Record<string, boolean>;
+  supportedFeatures: Record<string, string>;
 }
 
 /**
@@ -32,7 +40,160 @@ const terminalState: TerminalModeState = {
   kittyKeyboard: false,
   bracketedPaste: false,
   focusEvents: false,
+  enabledFeatures: {},
+  supportedFeatures: {},
 };
+
+/**
+ * Initialize input with feature detection and configuration
+ *
+ * This function detects terminal capabilities and enables features
+ * based on the provided configuration. Required features that are
+ * unsupported will throw an error, while optional features will
+ * degrade gracefully.
+ *
+ * @param term - Terminal instance to configure
+ * @param config - Input configuration
+ * @returns Promise that resolves to the actual input mode
+ */
+export async function initializeInput(
+  term: Terminal,
+  config: InputConfig
+): Promise<InputMode> {
+  // Use pre-detected capabilities if provided, otherwise detect
+  let capabilities: DetectedCapabilities;
+  if (config.detectedCapabilities) {
+    capabilities = config.detectedCapabilities;
+  } else {
+    capabilities = await detectCapabilities(term, {
+      performQueries: true,
+    });
+  }
+
+  // Store supported features
+  for (const [feature, level] of Object.entries(capabilities.features)) {
+    terminalState.supportedFeatures[feature] = level as string;
+  }
+
+  // Apply overrides if provided (for testing)
+  if (config.overrides) {
+    for (const [feature, supported] of Object.entries(config.overrides)) {
+      if (supported) {
+        terminalState.supportedFeatures[feature] = SupportLevel.Full;
+      } else {
+        terminalState.supportedFeatures[feature] = SupportLevel.None;
+      }
+    }
+  }
+
+  // Always enable raw mode for input handling
+  await enableRawMode(term);
+
+  // Process each configured feature
+  const errors: string[] = [];
+
+  for (const [featureName, featureConfig] of Object.entries(config.features)) {
+    if (!featureConfig?.enabled) {
+      continue;
+    }
+
+    const feature = featureName as InputFeature;
+    const minLevel =
+      (featureConfig.options?.minLevel as SupportLevel) || SupportLevel.Partial;
+    const isSupported = isFeatureSupported(capabilities, feature, minLevel);
+
+    if (!isSupported) {
+      if (featureConfig.required) {
+        errors.push(
+          `Required feature '${feature}' is not supported by terminal '${capabilities.terminalType}'`
+        );
+      }
+      // Skip unsupported optional features silently
+      continue;
+    }
+
+    // Enable the feature
+    try {
+      enableFeature(term, feature, featureConfig.options);
+      terminalState.enabledFeatures[feature] = true;
+    } catch (error) {
+      if (featureConfig.required) {
+        errors.push(`Failed to enable required feature '${feature}': ${error}`);
+      }
+      // Skip failed optional features silently
+    }
+  }
+
+  // Throw if any required features failed
+  if (errors.length > 0) {
+    throw new Error(`Input initialization failed:\n${errors.join('\n')}`);
+  }
+
+  // Configure decoder with enabled features
+  configureDecoder({
+    kittyKeyboard: terminalState.enabledFeatures[InputFeature.KittyKeyboard],
+    quirks: config.quirks !== false,
+    enabledFeatures: terminalState.enabledFeatures,
+    keyNormalization: config.keyNormalization ?? 'raw',
+  });
+
+  // Return the actual input mode
+  return getInputStatus();
+}
+
+/**
+ * Enable a specific feature
+ */
+function enableFeature(
+  term: Terminal,
+  feature: InputFeature,
+  options?: Record<string, unknown>
+): void {
+  switch (feature) {
+    case InputFeature.MouseTracking:
+      enableMouse(term, {
+        protocol: (options?.protocol as 'x10' | 'sgr') || 'sgr',
+        allMotion: options?.allMotion !== false,
+      });
+      break;
+
+    case InputFeature.KittyKeyboard:
+      pushKittyKeyboard(term, options?.flags as number | undefined);
+      break;
+
+    case InputFeature.BracketedPaste:
+      enableBracketedPaste(term);
+      break;
+
+    case InputFeature.FocusEvents:
+      enableFocusEvents(term);
+      break;
+
+    case InputFeature.Clipboard:
+      // Clipboard doesn't require enabling, just support detection
+      break;
+
+    default:
+      throw new Error(`Unknown feature: ${feature}`);
+  }
+}
+
+/**
+ * Get the current input status
+ */
+export function getInputStatus(): InputMode {
+  return {
+    raw: terminalState.rawMode,
+    echo: !terminalState.rawMode,
+    mouse: terminalState.mouseTracking,
+    mouseProtocol: terminalState.mouseProtocol,
+    kittyKeyboard: terminalState.kittyKeyboard,
+    bracketedPaste: terminalState.bracketedPaste,
+    focusEvents: terminalState.focusEvents,
+    enabledFeatures: { ...terminalState.enabledFeatures },
+    supportedFeatures: { ...terminalState.supportedFeatures },
+  };
+}
 
 /**
  * Enable raw mode on the terminal
@@ -77,7 +238,7 @@ export async function disableRawMode(_term: Terminal): Promise<void> {
   }
 
   // Restore terminal settings
-  const proc = Bun.spawn(['stty', 'sane'], {
+  const proc = Bun.spawn(['stty', 'sane', 'echo', 'icanon', 'iexten'], {
     stdin: 'inherit',
     stdout: 'inherit',
     stderr: 'inherit',
@@ -265,41 +426,59 @@ export function disableFocusEvents(term: Terminal): void {
 /**
  * Configure all input options at once
  *
+ * This function supports both the legacy InputOptions API and the new
+ * InputConfig API. When using InputOptions, it converts to InputConfig
+ * internally.
+ *
  * @param term - Terminal instance to configure
- * @param options - Input options to apply
+ * @param options - Input options to apply (legacy or modern)
+ * @returns Promise that resolves to InputMode (when using InputConfig) or void
  */
 export async function configureInput(
   term: Terminal,
-  options: InputOptions
-): Promise<void> {
-  // Configure the decoder with the same options
-  configureDecoder({ kittyKeyboard: options.kittyKeyboard });
+  options: InputOptions | InputConfig
+): Promise<InputMode | undefined> {
+  // Check if using new InputConfig API
+  if ('features' in options) {
+    return initializeInput(term, options);
+  }
 
-  // Always enable raw mode for input handling
-  await enableRawMode(term);
+  // Legacy API - convert to new format
+  const config: InputConfig = {
+    features: {},
+    quirks: true,
+  };
 
-  // Configure mouse if requested
   if (options.mouse) {
-    enableMouse(term, {
-      protocol: options.mouseProtocol,
-      allMotion: true,
-    });
+    config.features[InputFeature.MouseTracking] = {
+      enabled: true,
+      options: {
+        protocol: options.mouseProtocol || 'sgr',
+        allMotion: true,
+      },
+    };
   }
 
-  // Configure Kitty keyboard if requested
   if (options.kittyKeyboard) {
-    pushKittyKeyboard(term);
+    config.features[InputFeature.KittyKeyboard] = {
+      enabled: true,
+    };
   }
 
-  // Configure bracketed paste if requested
   if (options.bracketedPaste) {
-    enableBracketedPaste(term);
+    config.features[InputFeature.BracketedPaste] = {
+      enabled: true,
+    };
   }
 
-  // Configure focus events if requested
   if (options.focusEvents) {
-    enableFocusEvents(term);
+    config.features[InputFeature.FocusEvents] = {
+      enabled: true,
+    };
   }
+
+  // Use the new API but don't return the InputMode for backward compatibility
+  await initializeInput(term, config);
 }
 
 /**
@@ -316,6 +495,10 @@ export async function resetTerminal(term: Terminal): Promise<void> {
   disableBracketedPaste(term);
   popKittyKeyboard(term);
   disableMouse(term);
+
+  // Clear feature tracking
+  terminalState.enabledFeatures = {};
+  terminalState.supportedFeatures = {};
 
   // Restore normal mode
   await disableRawMode(term);

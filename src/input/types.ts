@@ -5,6 +5,8 @@
  * following a Crossterm-inspired API while being idiomatic to TypeScript.
  */
 
+import type { DetectedCapabilities } from './detection.ts';
+
 /**
  * Modifier keys state for keyboard and mouse events
  */
@@ -183,7 +185,7 @@ export type InputEvent =
   | ClipboardEvent;
 
 /**
- * Options for configuring input handling
+ * Options for configuring input handling (legacy API)
  */
 export interface InputOptions {
   /** Enable mouse tracking */
@@ -196,6 +198,41 @@ export interface InputOptions {
   bracketedPaste?: boolean;
   /** Enable focus change events */
   focusEvents?: boolean;
+}
+
+/**
+ * Feature configuration options
+ */
+export interface FeatureConfig {
+  /** Whether to enable this feature */
+  enabled: boolean;
+  /** Whether this feature is required (error if unsupported) */
+  required?: boolean;
+  /** Feature-specific options */
+  options?: Record<string, unknown>;
+}
+
+/**
+ * Key normalization modes
+ */
+export type KeyNormalization =
+  | 'raw' // Show raw key + modifiers (e.g., '6' + Shift)
+  | 'character'; // Show produced character (e.g., '^')
+
+/**
+ * Modern input configuration using feature-based API
+ */
+export interface InputConfig {
+  /** Feature configurations */
+  features: Partial<Record<string, FeatureConfig>>;
+  /** Whether to apply terminal-specific quirks (default: true) */
+  quirks?: boolean;
+  /** Override detected feature support (for testing) */
+  overrides?: Partial<Record<string, boolean>>;
+  /** Pre-detected capabilities to use instead of detecting again */
+  detectedCapabilities?: DetectedCapabilities;
+  /** Key normalization mode (default: 'raw') */
+  keyNormalization?: KeyNormalization;
 }
 
 /**
@@ -216,6 +253,10 @@ export interface InputMode {
   bracketedPaste: boolean;
   /** Focus events enabled */
   focusEvents: boolean;
+  /** Map of features and their actual enabled status */
+  enabledFeatures?: Record<string, boolean>;
+  /** Map of features and their support level */
+  supportedFeatures?: Record<string, string>;
 }
 
 /**

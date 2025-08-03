@@ -59,11 +59,6 @@ class EventStreamImpl implements InputEventStream {
           break;
         }
 
-        // For debugging: log errors but continue
-        if (process.env.DEBUG_INPUT) {
-          // Log input errors when debugging
-        }
-
         // Don't mark as done on error, just continue
         // This allows the stream to recover from transient errors
         await new Promise((resolve) => setTimeout(resolve, 10));

@@ -12,19 +12,19 @@ import type { KeyCode } from './types.ts';
  */
 export const CTRL_CHARS: Record<number, KeyCode> = {
   0: { char: '\0' }, // Null
-  1: { char: 'a' }, // Ctrl+A (with ctrl modifier)
+  1: { char: 'a' }, // Ctrl+A
   2: { char: 'b' }, // Ctrl+B
   3: { char: 'c' }, // Ctrl+C
   4: { char: 'd' }, // Ctrl+D
   5: { char: 'e' }, // Ctrl+E
   6: { char: 'f' }, // Ctrl+F
   7: { char: 'g' }, // Ctrl+G (Bell)
-  8: 'Backspace', // Ctrl+H
-  9: 'Tab', // Ctrl+I
-  10: 'Enter', // Ctrl+J (Line Feed)
+  8: { char: 'h' }, // Ctrl+H (Backspace on some terminals)
+  9: 'Tab', // Tab key (indistinguishable from Ctrl+I in raw mode)
+  10: { char: 'j' }, // Ctrl+J (Line Feed)
   11: { char: 'k' }, // Ctrl+K
   12: { char: 'l' }, // Ctrl+L
-  13: 'Enter', // Ctrl+M (Carriage Return)
+  13: 'Enter', // Enter key (indistinguishable from Ctrl+M in raw mode)
   14: { char: 'n' }, // Ctrl+N
   15: { char: 'o' }, // Ctrl+O
   16: { char: 'p' }, // Ctrl+P

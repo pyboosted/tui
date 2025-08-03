@@ -45,7 +45,12 @@ function getDecoder(): InputDecoder {
 /**
  * Configure the decoder with options
  */
-export function configureDecoder(options: { kittyKeyboard?: boolean }): void {
+export function configureDecoder(options: {
+  kittyKeyboard?: boolean;
+  quirks?: boolean;
+  enabledFeatures?: Record<string, boolean>;
+  keyNormalization?: 'raw' | 'character';
+}): void {
   // For now, we need to recreate the decoder with new options
   // In the future, we could add a method to update options on existing decoder
   sharedDecoder = new InputDecoder(options);
@@ -69,9 +74,7 @@ export async function readEvent(): Promise<InputEvent> {
 
   // Keep reading until we get an event
   while (true) {
-    // Read data from stdin
     const { done, value } = await reader.read();
-
     if (done) {
       throw new Error('stdin closed');
     }

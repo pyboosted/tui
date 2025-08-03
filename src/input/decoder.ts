@@ -5,6 +5,7 @@
  * terminal escape sequences into typed input events.
  */
 
+import { getUnshiftedChar, isShiftedChar } from './key-utils.ts';
 import {
   CSI_KEY_MAP,
   CTRL_CHARS,
@@ -26,6 +27,7 @@ import type {
   KeyEvent,
   KeyEventKind,
   KeyModifiers,
+  KeyNormalization,
   MouseButton,
   MouseEvent,
 } from './types.ts';
@@ -74,6 +76,9 @@ export class InputDecoder {
   // Terminal quirks handling
   private quirksEnabled = true;
 
+  // Enabled features map
+  private enabledFeatures: Record<string, boolean> = {};
+
   // Track physical modifier key state to work around terminal bugs
   private physicalModifierState = {
     shift: false,
@@ -82,9 +87,19 @@ export class InputDecoder {
     meta: false,
   };
 
-  constructor(options?: { kittyKeyboard?: boolean; quirks?: boolean }) {
+  // Key normalization mode
+  private keyNormalization: KeyNormalization = 'raw';
+
+  constructor(options?: {
+    kittyKeyboard?: boolean;
+    quirks?: boolean;
+    enabledFeatures?: Record<string, boolean>;
+    keyNormalization?: KeyNormalization;
+  }) {
     this.kittyEnabled = options?.kittyKeyboard ?? false;
     this.quirksEnabled = options?.quirks ?? true;
+    this.enabledFeatures = options?.enabledFeatures ?? {};
+    this.keyNormalization = options?.keyNormalization ?? 'raw';
     this.reset();
   }
 
@@ -206,8 +221,18 @@ export class InputDecoder {
       } else {
         this.handleControlChar(byte);
       }
+    } else if (byte >= 128) {
+      // High-bit character - start of UTF-8 sequence or extended ASCII
+      // On macOS, Alt+key produces Unicode characters (e.g., Alt+z = Ω)
+      // On other systems, Alt+key might set the high bit
+      // For now, treat all high-bit characters as regular characters
+      // TODO: Add platform-specific Alt+key detection
+      const char = String.fromCharCode(byte);
+      if (!this.kittyEnabled) {
+        this.emitKey({ char }, false);
+      }
     } else {
-      // Regular printable character
+      // Regular printable character (32-127)
       const char = String.fromCharCode(byte);
 
       // When Kitty is enabled, suppress the raw character
@@ -434,9 +459,6 @@ export class InputDecoder {
    */
   private handleOSCSequence(): void {
     // OSC sequences are processed in processBuffer
-    if (process.env.DEBUG_OSC) {
-      // OSC debugging enabled
-    }
 
     // OSC 52 clipboard sequence
     if (this.oscParam === '52') {
@@ -455,9 +477,6 @@ export class InputDecoder {
           });
         } catch (_e) {
           // Invalid base64, ignore
-          if (process.env.DEBUG_OSC) {
-            // Log OSC errors when debugging
-          }
         }
       }
     }
@@ -480,12 +499,15 @@ export class InputDecoder {
 
     const code = CTRL_CHARS[byte];
     if (code) {
+      // For control characters, we need to decide if they should have ctrl modifier
+      // Some bytes represent actual keys (Tab=9, Enter=13) that shouldn't have ctrl
+      // Others represent Ctrl+letter combinations that should
       const isCtrlChar =
         byte < 0x20 &&
-        byte !== 0x09 &&
-        byte !== 0x0a &&
-        byte !== 0x0d &&
-        byte !== 0x1b;
+        byte !== 0x09 && // Tab (not Ctrl+I)
+        byte !== 0x0a && // Line Feed (Ctrl+J)
+        byte !== 0x0d && // Enter (not Ctrl+M)
+        byte !== 0x1b; // Escape
       this.emitKey(code, isCtrlChar);
     }
   }
@@ -860,10 +882,6 @@ export class InputDecoder {
       eventType = this.params[2];
     }
 
-    if (process.env.DEBUG_KITTY) {
-      // Log Kitty protocol details when debugging
-    }
-
     // Convert event type to our enum
     let kind: KeyEventKind = 'press';
     let _repeat = false;
@@ -1073,28 +1091,33 @@ export class InputDecoder {
       // 57443-57444: Control keys
       // 57445-57446: Alt keys
       // 57447-57448: Meta/Super keys
+      // But on macOS, the terminal remaps these:
       case 57_441:
         return 'Shift'; // Left Shift (0xE061)
       case 57_442:
-        return 'Shift'; // Right Shift (0xE062)
+        return process.platform === 'darwin' ? 'Control' : 'Shift'; // macOS Control or Right Shift
       case 57_443:
-        return 'Control'; // Left Control (0xE063)
+        return process.platform === 'darwin' ? 'Alt' : 'Control'; // macOS Option or Left Control
       case 57_444:
-        return 'Control'; // Right Control (0xE064)
+        return process.platform === 'darwin' ? 'Meta' : 'Control'; // macOS Command or Right Control
       case 57_445:
         return 'Alt'; // Left Alt (0xE065)
       case 57_446:
         return 'Alt'; // Right Alt (0xE066)
       case 57_447:
-        return 'Meta'; // Left Super/Meta (0xE067)
+        // On macOS, Right Shift sends 57447 instead of Left Meta
+        return process.platform === 'darwin' ? 'Shift' : 'Meta';
       case 57_448:
         return 'Meta'; // Right Super/Meta (0xE068)
       case 57_449:
-        return 'CapsLock'; // Caps Lock (0xE069)
+        // On macOS, Right Option sends CapsLock code
+        return process.platform === 'darwin' ? 'Alt' : 'CapsLock';
       case 57_450:
-        return 'NumLock'; // Num Lock (0xE06A)
+        // On macOS, Right Command sends NumLock code
+        return process.platform === 'darwin' ? 'Meta' : 'NumLock';
       case 57_451:
-        return 'ScrollLock'; // Scroll Lock (0xE06B)
+        // On macOS, Right Shift might send ScrollLock code
+        return process.platform === 'darwin' ? 'Shift' : 'ScrollLock';
 
       // Delete key
       case 0x1b_5b_33:
@@ -1195,6 +1218,7 @@ export class InputDecoder {
     additionalMods: Partial<KeyModifiers> = {},
     kind?: KeyEventKind
   ): void {
+    let actualCode = code;
     const modifiers: KeyModifiers = {
       ctrl: isCtrl || Boolean(additionalMods.ctrl),
       alt: Boolean(additionalMods.alt),
@@ -1202,9 +1226,29 @@ export class InputDecoder {
       meta: Boolean(additionalMods.meta),
     };
 
+    // Apply key normalization when in 'raw' mode and not using Kitty protocol
+    if (
+      this.keyNormalization === 'raw' &&
+      !this.kittyEnabled &&
+      typeof code === 'object' &&
+      code.char
+    ) {
+      const char = code.char;
+      // Check if it's a shifted character without explicit shift modifier
+      if (isShiftedChar(char) && !modifiers.shift) {
+        // Get the unshifted character
+        const unshifted = getUnshiftedChar(char);
+        if (unshifted) {
+          // Use the unshifted character and add shift modifier
+          actualCode = { char: unshifted };
+          modifiers.shift = true;
+        }
+      }
+    }
+
     const event: KeyEvent = {
       type: 'key',
-      code,
+      code: actualCode,
       modifiers,
       repeat: kind === 'repeat',
       raw: this.getRawSequence(),
