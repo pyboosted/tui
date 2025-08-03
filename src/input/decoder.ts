@@ -5,6 +5,7 @@
  * terminal escape sequences into typed input events.
  */
 
+import { InputFeature } from './features.ts';
 import { getUnshiftedChar, isShiftedChar } from './key-utils.ts';
 import {
   CSI_KEY_MAP,
@@ -90,16 +91,25 @@ export class InputDecoder {
   // Key normalization mode
   private keyNormalization: KeyNormalization = 'raw';
 
+  // Progressive detection
+  private progressiveDetection = true;
+  private detectedFeatures = new Set<string>();
+  private onFeatureDetected?: (feature: string) => void;
+
   constructor(options?: {
     kittyKeyboard?: boolean;
     quirks?: boolean;
     enabledFeatures?: Record<string, boolean>;
     keyNormalization?: KeyNormalization;
+    progressiveDetection?: boolean;
+    onFeatureDetected?: (feature: string) => void;
   }) {
     this.kittyEnabled = options?.kittyKeyboard ?? false;
     this.quirksEnabled = options?.quirks ?? true;
     this.enabledFeatures = options?.enabledFeatures ?? {};
     this.keyNormalization = options?.keyNormalization ?? 'raw';
+    this.progressiveDetection = options?.progressiveDetection ?? true;
+    this.onFeatureDetected = options?.onFeatureDetected;
     this.reset();
   }
 
@@ -131,6 +141,28 @@ export class InputDecoder {
    */
   clear(): void {
     this.events = [];
+  }
+
+  /**
+   * Detect a feature at runtime
+   */
+  private detectFeature(feature: string): void {
+    if (!this.progressiveDetection) {
+      return;
+    }
+
+    // Check if we've already detected this feature
+    if (this.detectedFeatures.has(feature)) {
+      return;
+    }
+
+    // Mark as detected
+    this.detectedFeatures.add(feature);
+
+    // Notify callback
+    if (this.onFeatureDetected) {
+      this.onFeatureDetected(feature);
+    }
   }
 
   /**
@@ -462,6 +494,9 @@ export class InputDecoder {
 
     // OSC 52 clipboard sequence
     if (this.oscParam === '52') {
+      // Detect clipboard support
+      this.detectFeature(InputFeature.Clipboard);
+
       // Format: OSC 52 ; c ; base64-data
       const parts = this.oscBuffer.split(';');
       if (parts.length >= 2 && parts[0] === 'c') {
@@ -541,6 +576,9 @@ export class InputDecoder {
   private handleCSISequence(): void {
     // Check for bracketed paste start
     if (this.final === '~' && this.params[0] === 200) {
+      // Detect bracketed paste support
+      this.detectFeature(InputFeature.BracketedPaste);
+
       this.state = 'paste';
       this.inPaste = true;
       this.pasteBuffer = '';
@@ -719,6 +757,27 @@ export class InputDecoder {
       }
     }
 
+    // Check for focus events (CSI I and CSI O)
+    if (this.final === 'I' && this.params.length === 0) {
+      // Focus in
+      this.detectFeature(InputFeature.FocusEvents);
+      this.events.push({
+        type: 'focus',
+        gained: true,
+      });
+      return;
+    }
+
+    if (this.final === 'O' && this.params.length === 0) {
+      // Focus out
+      this.detectFeature(InputFeature.FocusEvents);
+      this.events.push({
+        type: 'focus',
+        gained: false,
+      });
+      return;
+    }
+
     // Handle keyboard sequences
     const key = this.lookupCSIKey();
     if (key) {
@@ -802,6 +861,9 @@ export class InputDecoder {
    * Handle X10 mouse protocol
    */
   private handleX10Mouse(): void {
+    // Detect mouse support
+    this.detectFeature(InputFeature.MouseTracking);
+
     if (this.bufferPos < 6) {
       return;
     }
@@ -829,6 +891,9 @@ export class InputDecoder {
    * Handle complete SGR mouse sequence
    */
   private handleSGRMouseComplete(): void {
+    // Detect mouse support
+    this.detectFeature(InputFeature.MouseTracking);
+
     // SGR format: CSI < button ; x ; y M/m
     // params[0] = button + modifiers
     // params[1] = x coordinate
@@ -851,6 +916,9 @@ export class InputDecoder {
    */
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function handles the complex Kitty keyboard protocol with many special cases
   private handleKittyKeyboard(): void {
+    // Detect Kitty keyboard support
+    this.detectFeature(InputFeature.KittyKeyboard);
+
     // Kitty protocol sends: ESC [ unicode-key-code ; modifiers : event-type u
     // Our parser treats : as separator, so "97;1:3" becomes params [97, 1, 3]
 

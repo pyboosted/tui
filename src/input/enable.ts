@@ -107,8 +107,18 @@ export async function initializeInput(
         errors.push(
           `Required feature '${feature}' is not supported by terminal '${capabilities.terminalType}'`
         );
+        continue;
       }
-      // Skip unsupported optional features silently
+      // For optional features with progressive detection enabled,
+      // try to enable them anyway
+      if (config.progressiveDetection !== false) {
+        try {
+          enableFeature(term, feature, featureConfig.options);
+          // Don't mark as enabled yet - wait for progressive detection
+        } catch (_error) {
+          // Ignore errors for unsupported optional features
+        }
+      }
       continue;
     }
 
@@ -135,6 +145,18 @@ export async function initializeInput(
     quirks: config.quirks !== false,
     enabledFeatures: terminalState.enabledFeatures,
     keyNormalization: config.keyNormalization ?? 'raw',
+    progressiveDetection: config.progressiveDetection ?? true,
+    onFeatureDetected: (feature) => {
+      // Update enabled features when detected at runtime
+      if (!terminalState.enabledFeatures[feature]) {
+        terminalState.enabledFeatures[feature] = true;
+
+        // Call user callback if provided
+        if (config.onFeatureDetected) {
+          config.onFeatureDetected(feature);
+        }
+      }
+    },
   });
 
   // Return the actual input mode

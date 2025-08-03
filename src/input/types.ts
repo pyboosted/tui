@@ -220,6 +220,11 @@ export type KeyNormalization =
   | 'character'; // Show produced character (e.g., '^')
 
 /**
+ * Callback for when a feature is detected at runtime
+ */
+export type FeatureDetectedCallback = (feature: string) => void;
+
+/**
  * Modern input configuration using feature-based API
  */
 export interface InputConfig {
@@ -233,6 +238,10 @@ export interface InputConfig {
   detectedCapabilities?: DetectedCapabilities;
   /** Key normalization mode (default: 'raw') */
   keyNormalization?: KeyNormalization;
+  /** Enable progressive feature detection (default: true) */
+  progressiveDetection?: boolean;
+  /** Callback when features are detected at runtime */
+  onFeatureDetected?: FeatureDetectedCallback;
 }
 
 /**

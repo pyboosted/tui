@@ -112,45 +112,58 @@ function formatEvent(event: InputEvent): string {
 
 async function main() {
   const term = Terminal.open();
+  let stream: input.InputEventStream | null = null;
+
+  const cleanup = async (exitCode = 0) => {
+    if (stream) {
+      stream.close();
+    }
+    if (process.stdin.isTTY) {
+      await input.resetTerminal(term);
+    }
+    term.close();
+    process.exit(exitCode);
+  };
+
+  process.on('SIGINT', () => cleanup(0));
 
   try {
-    // Detect terminal capabilities
     const capabilities = await input.detectCapabilities(term);
     displayCapabilities(capabilities);
 
-    // Initialize input with optional features
-    writeLine();
-    writeLine('Initializing input with optional features...');
     const inputMode = await input.initializeInput(term, {
       detectedCapabilities: capabilities,
-      keyNormalization: 'raw', // Always show raw key + modifiers
+      keyNormalization: 'raw',
+      progressiveDetection: true,
+      onFeatureDetected: (feature) => {
+        writeLine(`\x1b[32m✓ Feature '${feature}' detected at runtime!\x1b[0m`);
+      },
       features: {
         [input.InputFeature.MouseTracking]: {
           enabled: true,
           required: false,
           options: { protocol: 'sgr' },
         },
-        [input.InputFeature.KittyKeyboard]: {
-          enabled: true,
-          required: false,
-        },
-        [input.InputFeature.BracketedPaste]: {
-          enabled: true,
-          required: false,
-        },
-        [input.InputFeature.FocusEvents]: {
-          enabled: true,
-          required: false,
-        },
+        [input.InputFeature.KittyKeyboard]: { enabled: true, required: false },
+        [input.InputFeature.BracketedPaste]: { enabled: true, required: false },
+        [input.InputFeature.FocusEvents]: { enabled: true, required: false },
       },
     });
 
     displayEnabledFeatures(inputMode);
 
-    // Instructions
     writeLine();
     writeLine('Press Ctrl+C to exit');
     writeLine('Try typing or pressing keys...');
+
+    // Progressive detection is enabled by default
+    writeLine();
+    writeLine('Progressive detection is enabled!');
+    writeLine('Features will be detected when you use them:');
+    writeLine('  - Move mouse to detect mouse support');
+    writeLine('  - Paste text to detect bracketed paste');
+    writeLine('  - Switch windows to detect focus events');
+
     writeLine();
     writeLine('Events:');
 
@@ -159,44 +172,27 @@ async function main() {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
-    // Handle input events
-    const stream = input.createEventStream();
+    // Create the stream after initialization to avoid conflicts
+    stream = input.createEventStream();
 
     for await (const event of stream) {
       writeLine(`  ${formatEvent(event)}`);
 
-      // Check for Ctrl+C
       if (
         event.type === 'key' &&
         event.modifiers.ctrl &&
         typeof event.code === 'object' &&
         event.code.char === 'c'
       ) {
-        stream.close();
-        process.exit(0);
+        break;
       }
     }
+  } catch (error) {
+    process.stderr.write(`Error: ${error}\r\n`);
+    await cleanup(1);
   } finally {
-    await input.resetTerminal(term);
-    term.close();
+    await cleanup(0);
   }
 }
 
-main().catch((error) => {
-  process.stderr.write(`Error: ${error}\r\n`);
-  process.exit(1);
-});
-
-// Ensure terminal is reset on exit
-process.on('exit', () => {
-  // Force terminal reset
-  try {
-    const _proc = Bun.spawnSync(['stty', 'sane', 'echo', 'icanon', 'iexten'], {
-      stdin: 'ignore',
-      stdout: 'ignore',
-      stderr: 'ignore',
-    });
-  } catch {
-    // Best effort
-  }
-});
+main();

@@ -74,6 +74,7 @@ export {
   configureDecoder,
   pollEvent,
   readEvent,
+  releaseStdinReader,
   tryReadEvent,
 } from './reader.ts';
 // Stream API

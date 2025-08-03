@@ -25,12 +25,15 @@ class EventStreamImpl implements InputEventStream {
   private queue: InputEvent[] = [];
   private resolvers: Array<(value: IteratorResult<InputEvent>) => void> = [];
   private closed = false;
-  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: Used to track background reading task
-  private readTask: Promise<void>;
+  private keepAliveTimer: Timer | undefined;
 
   constructor(_options?: InputOptions) {
     // Start the background reading task
-    this.readTask = this.startReading();
+    this.startReading();
+
+    // Keep the process alive while the stream is open
+    // biome-ignore lint/suspicious/noEmptyBlockStatements: Keep-alive timer
+    this.keepAliveTimer = setInterval(() => {}, 1000 * 60 * 60);
   }
 
   /**
@@ -103,7 +106,15 @@ class EventStreamImpl implements InputEventStream {
    * Close the stream
    */
   close(): void {
+    if (this.closed) {
+      return;
+    }
     this.closed = true;
+
+    if (this.keepAliveTimer) {
+      clearInterval(this.keepAliveTimer);
+      this.keepAliveTimer = undefined;
+    }
 
     // Resolve all pending promises
     for (const resolver of this.resolvers) {

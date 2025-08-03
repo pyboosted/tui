@@ -23,11 +23,31 @@ const _readBuffer = new Uint8Array(READ_BUFFER_SIZE);
  * Global stdin stream reader - created once and reused
  */
 let stdinReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+let stdinStream: ReadableStream<Uint8Array> | null = null;
 
 function getStdinReader(): ReadableStreamDefaultReader<Uint8Array> {
   if (!stdinReader) {
-    const stream = Bun.stdin.stream();
-    stdinReader = stream.getReader() as ReadableStreamDefaultReader<Uint8Array>;
+    try {
+      // Get a fresh stream each time if the previous one is locked
+      if (!stdinStream) {
+        stdinStream = Bun.stdin.stream();
+      }
+
+      // Check if the stream is locked
+      try {
+        stdinReader =
+          stdinStream.getReader() as ReadableStreamDefaultReader<Uint8Array>;
+      } catch (_error) {
+        // If locked, create a new stream
+        stdinStream = Bun.stdin.stream();
+        stdinReader =
+          stdinStream.getReader() as ReadableStreamDefaultReader<Uint8Array>;
+      }
+    } catch (error) {
+      throw new Error(
+        `Failed to get stdin reader: ${error instanceof Error ? error.message : error}`
+      );
+    }
   }
   return stdinReader as ReadableStreamDefaultReader<Uint8Array>;
 }
@@ -50,6 +70,8 @@ export function configureDecoder(options: {
   quirks?: boolean;
   enabledFeatures?: Record<string, boolean>;
   keyNormalization?: 'raw' | 'character';
+  progressiveDetection?: boolean;
+  onFeatureDetected?: (feature: string) => void;
 }): void {
   // For now, we need to recreate the decoder with new options
   // In the future, we could add a method to update options on existing decoder
@@ -153,6 +175,21 @@ export async function tryReadEvent(): Promise<InputEvent | null> {
   }
 
   return null;
+}
+
+/**
+ * Release the stdin reader
+ */
+export function releaseStdinReader(): void {
+  if (stdinReader) {
+    try {
+      stdinReader.releaseLock();
+    } catch {
+      // Ignore errors
+    }
+    stdinReader = null;
+  }
+  stdinStream = null;
 }
 
 /**
